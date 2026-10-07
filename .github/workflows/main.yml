@@ -1,4 +1,4 @@
-name: Public SSH (No Tailscale Needed)
+name: Public SSH Runner
 
 on:
   workflow_dispatch:
@@ -8,26 +8,47 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
-      - name: Configure SSH Passwords
+      - name: Configure SSH and Passwords
         run: |
+          # 1. Install and start SSH server
           sudo apt-get update && sudo apt-get install -y openssh-server
           sudo systemctl enable --now ssh
+
+          # 2. Set root and runner passwords
           echo "root:runner" | sudo chpasswd
-          sudo sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/^#*PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config
-          sudo systemctl restart ssh
+          echo "runner:runner" | sudo chpasswd
+
+          # 3. Clean any existing config drop-ins that block passwords
+          sudo rm -f /etc/ssh/sshd_config.d/*
+
+          # 4. Enable password login and root access
+          sudo tee /etc/ssh/sshd_config.d/99-enable-passwords.conf > /dev/null << 'EOF'
+          PermitRootLogin yes
+          PasswordAuthentication yes
+          KbdInteractiveAuthentication yes
+          PubkeyAuthentication yes
+          UsePAM yes
+          EOF
+
+          # 5. Restart ssh service
+          sudo systemctl restart ssh || sudo systemctl restart sshd
 
       - name: Start Public Tunnel
         run: |
-          # Creates a public relay on port 443 without needing signup
-          ssh -o StrictHostKeyChecking=no -p 443 -R0:localhost:22 a.pinggy.io > pinggy.log 2>&1 &
-          sleep 4
+          # Use tcp@a.pinggy.io to force a raw TCP SSH tunnel (not HTTP)
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R0:localhost:22 tcp@a.pinggy.io > pinggy.log 2>&1 &
+          sleep 6
+
           echo "=========================================================="
-          echo "SHARE THIS EXACT COMMAND WITH ANYONE:"
-          grep -o "ssh -p [0-9]* root@[^ ]*" pinggy.log || cat pinggy.log
+          echo "RAW TUNNEL LOGS:"
+          cat pinggy.log
+          echo "=========================================================="
+          echo "COMMAND TO SHARE WITH OTHERS:"
+          grep -oE "ssh -p [0-9]+ root@[^ ]+" pinggy.log || echo "Check RAW TUNNEL LOGS above for the 'ssh -p' command."
           echo "Password: runner"
           echo "=========================================================="
 
       - name: Keep Runner Alive
         run: |
+          echo "Runner active for 6 hours..."
           sleep 21600
