@@ -1,0 +1,33 @@
+name: Public SSH (No Tailscale Needed)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  public-ssh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Configure SSH Passwords
+        run: |
+          sudo apt-get update && sudo apt-get install -y openssh-server
+          sudo systemctl enable --now ssh
+          echo "root:runner" | sudo chpasswd
+          sudo sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          sudo sed -i 's/^#*PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config
+          sudo systemctl restart ssh
+
+      - name: Start Public Tunnel
+        run: |
+          # Creates a public relay on port 443 without needing signup
+          ssh -o StrictHostKeyChecking=no -p 443 -R0:localhost:22 a.pinggy.io > pinggy.log 2>&1 &
+          sleep 4
+          echo "=========================================================="
+          echo "SHARE THIS EXACT COMMAND WITH ANYONE:"
+          grep -o "ssh -p [0-9]* root@[^ ]*" pinggy.log || cat pinggy.log
+          echo "Password: runner"
+          echo "=========================================================="
+
+      - name: Keep Runner Alive
+        run: |
+          sleep 21600
